@@ -10,6 +10,8 @@ processing (log-mel spectrogram template matching). No machine learning, no GPU,
 - **Robust to volume and background**: playback level does not matter, and only the loud
   time-frequency cells of the reference are compared, so music and noise underneath have
   limited effect.
+- **Tolerates pitch variation**: sound effects that a game or app plays slightly faster or
+  slower each time are matched with `pitch_tolerance`.
 - **Light**: a few percent of one CPU core, bounded memory, NumPy + SciPy + SoundCard only.
 
 > **Platform status.** Verified on Linux (Manjaro, PipeWire 1.6 with pipewire-pulse; live
@@ -93,17 +95,23 @@ sounddetector scan session.wav -e bite --expect 4
 ```
 
 ```text
-Strongest matches of 'bite' (start, score):
-    1. 00:12.341  0.962  <- detected
-    2. 00:47.902  0.948  <- detected
-    3. 01:20.115  0.931  <- detected
-    4. 02:03.660  0.874  <- detected
-    5. 00:31.208  0.552
-If the top 4 are the real 'bite' events, a threshold of 0.71 separates them from everything
-else (margin 0.32).
+Strongest matches of 'bite' (start, score, window level, template):
+    1. 01:34.238  0.901   -29.6 dBFS  bite-2  <- detected
+    2. 01:25.278  0.896   -28.2 dBFS  bite-1@0.98  <- detected
+    3. 00:36.238  0.881   -27.2 dBFS  bite-2@0.96  <- detected
+    4. 02:00.802  0.880   -28.2 dBFS  bite-1@1.06  <- detected
+    5. 00:23.978  0.795   -36.2 dBFS  bite-3@1.02
+If the top 4 are the real 'bite' events, a threshold of 0.84 separates them from everything
+else (margin 0.09).
 ```
 
-`--apply` saves that threshold. The score is a **similarity** (cosine of the angle between the
+`--apply` saves that threshold. The window level helps when the same sound also comes from
+farther away (another player's, another tab's): here the fifth match is a real but distant
+occurrence, 7 dB quieter, so `--min-level -35` removes it; the best remaining candidate scores
+0.73, a margin of 0.15. Leave a few dB of room below your quietest real event: its level varies
+with distance and volume settings.
+
+The score is a **similarity** (cosine of the angle between the
 reference and the audio, in −1…1), not a probability: what counts as "high enough" depends on
 the sound and the background, which is why it is measured rather than guessed. A small margin
 means some false or missed detections should be expected.
@@ -116,9 +124,25 @@ sounddetector monitor -e bite --json             # one JSON object per detection
 sounddetector monitor -e bite --debug            # level, best score and CPU load every second
 ```
 
-`sounddetector set bite --threshold 0.8 --cooldown 2` changes stored settings; `--threshold` and
-`--cooldown` on `scan`/`monitor` override them for one run. `--reference FILE.wav` uses a WAV
-directly, without the library.
+### Settings
+
+| Setting (`sounddetector set NAME ...`) | Default | What it does |
+|---|---|---|
+| `--threshold` | 0.75 | similarity needed to report the event |
+| `--cooldown` | 3 s | ignore the event this long after reporting it |
+| `--min-level` | −50 dBFS | windows quieter than this are not matched (use it to ignore distant copies of the sound) |
+| `--pitch-tolerance` | 0 | also match each clip played up to this much faster or slower; 0.06 = ±6 % in 2 % steps |
+| `--template-length` | 0 (all) | use only the first seconds of each clip, so the event is reported sooner |
+| `--mask-db` | 30 dB | how far below its loudest part the reference is still compared |
+
+The same options on `scan` and `monitor` override the stored values for one run, which is the
+way to try them out. `--reference FILE.wav` uses a WAV directly, without the library.
+
+**Sounds whose pitch varies.** Many games play a sound effect slightly faster or slower each
+time. Even a 3 % change shifts a 0.8 s template by 24 ms and ruins the match; with
+`--pitch-tolerance 0.06` each clip is also matched at 0.94…1.06× speed (7 variants; the
+`template` field shows which one matched, e.g. `bite-1@0.98`). Each variant costs about as much
+CPU as another clip.
 
 ## Library usage
 
@@ -159,7 +183,9 @@ for d in result.detections:
 
 A `Detection` has `name`, `similarity`, `start`/`end` (stream seconds of the matched sound),
 `detected_at`, `latency` (from the start of the sound to its report), `template` (which clip
-matched) and `timestamp` (wall clock, live only). `Matcher` is the I/O-free core if you bring
+and speed matched), `level_db` (level of the matched window) and `timestamp` (wall clock, live
+only). `SoundEvent.from_wav(..., pitch_tolerance=0.06, template_length=0.3)` and
+`Library().load(name, min_level_db=-31)` take the same settings as the CLI. `Matcher` is the I/O-free core if you bring
 your own audio: `Matcher(events).feed(mono_samples_at_22050_hz)` returns detections.
 
 Capture runs in its own thread, so audio keeps flowing while your code works; detections are
@@ -182,10 +208,12 @@ audio ─► mono, 22050 Hz ─► log-mel frames ─► masked normalized ─�
    loudest cell — are kept. Quiet parts of a reference (a decaying tail, the room behind it) are
    exactly where background sound dominates in real use, so comparing them would only add noise.
    Frames with no active cell are cut from both ends, which also shortens the detection delay.
+   With a pitch tolerance, each reference is also resampled to several playback speeds, each
+   becoming a template of its own.
 3. **Similarity.** For a window ending at every new frame, the active cells of each frame are
    centred (removing playback volume and flat background) and the cosine similarity with the
-   reference is computed. This is done incrementally: each frame is processed once, and only the
-   last template-length of frames is kept.
+   reference is computed. This is done incrementally: each new frame adds its terms to every
+   window it belongs to at once, so per template only one vector of partial sums is kept.
 4. **Gating and events.** Windows quieter than −50 dBFS (`min_level_db`) are not scored. When the
    score crosses the threshold the detector waits up to 20 ms for the peak, reports it, and then
    stays quiet until the score drops and the cooldown has passed.
@@ -206,6 +234,7 @@ synthetic reference played through the real audio stack:
 | Similarity, synthetic tests | real events 0.94–1.00 under music or pink noise down to ~5 dB SNR; unrelated sounds, music and noise ≤ 0.59 |
 | Similarity, through the audio stack | 0.82–1.00 (lowest: event at −12 dB under two applications' music, whole-output capture; 0.92 for the same event with per-application capture) |
 | Per-application capture | other applications' audio absent (−110 dB) from the capture |
+| A real game's sound effect: two sessions (8 min) with the player's own and other players' copies of a pitch-randomised splash, music and water ambience; 4 reference clips × 7 speeds, 0.3 s templates, threshold 0.8, `--min-level -35` | own events 9/9 (0.82–0.95), no false detections, best other candidate 0.73; reported 0.30–0.32 s after the sound starts (measured live); matching 3–7 % of a core |
 
 **The detection delay is dominated by the reference length**: the detector can only be sure
 once it has heard the whole reference. For time-critical uses, keep the reference short (cut it
@@ -241,8 +270,14 @@ The detection algorithm knows nothing about devices; capture knows nothing about
 - **Loopback level may depend on the output volume**, depending on the platform. Matching does
   not care about level, but very quiet audio falls under the −50 dBFS gate
   (`sounddetector set NAME --min-level -60`).
-- **Fixed templates.** Sounds that vary a lot between occurrences (pitch-shifted, randomly
-  layered) need several reference clips, and may still be beyond template matching.
+- **Every copy of the sound is detected.** If others nearby make the same sound (other players
+  in a game), only the level tells near from far (`--min-level`), and that depends on volume
+  settings and distance. Telling *your* occurrence apart (e.g. by timing) is up to the consumer.
+- **Templates are fixed.** Pitch variation is covered by `--pitch-tolerance`; sounds that vary
+  in other ways (randomly layered, different each time) need several reference clips and may
+  still be beyond template matching.
+- **Background muting.** Some applications (games especially) mute themselves when their
+  window loses focus; there is then nothing to detect. Enable their "sound in background" option.
 - **Similarity is not a probability**, and thresholds do not transfer between sounds or setups.
 
 ## Troubleshooting

@@ -181,9 +181,15 @@ def cmd_events(args: argparse.Namespace) -> int:
     for name in names:
         info = lib.info(name)
         s = info.settings
+        extra = ""
+        if s["pitch_tolerance"]:
+            extra += f", pitch ±{s['pitch_tolerance'] * 100:g}%"
+        if s["template_length"]:
+            extra += f", first {s['template_length']:g}s of each clip"
         print(
             f"  {name}: {len(info.clips)} clip(s), threshold {s['threshold']:g}, cooldown "
             f"{s['cooldown']:g}s, min level {s['min_level_db']:g} dBFS, mask {s['mask_db']:g} dB"
+            f"{extra}"
         )
         for c in info.clips:
             print(f"      {c.name}")
@@ -198,12 +204,12 @@ def cmd_set(args: argparse.Namespace) -> int:
         "cooldown": args.cooldown,
         "min_level_db": args.min_level,
         "mask_db": args.mask_db,
+        "pitch_tolerance": args.pitch_tolerance,
+        "template_length": args.template_length,
     }
     values = {k: v for k, v in values.items() if v is not None}
     if not values:
-        raise UsageError(
-            "nothing to change; give --threshold, --cooldown, --min-level or --mask-db"
-        )
+        raise UsageError("nothing to change; see `sounddetector set --help`")
     s = lib.update_settings(args.name, values)
     print(", ".join(f"{k} = {v:g}" for k, v in s.items()))
     return 0
@@ -214,7 +220,13 @@ def cmd_set(args: argparse.Namespace) -> int:
 
 def _events(args: argparse.Namespace) -> list[SoundEvent]:
     lib = Library(args.library)
-    overrides = {"threshold": args.threshold, "cooldown": args.cooldown}
+    overrides = {
+        "threshold": args.threshold,
+        "cooldown": args.cooldown,
+        "min_level_db": args.min_level,
+        "pitch_tolerance": args.pitch_tolerance,
+        "template_length": args.template_length,
+    }
     events: list[SoundEvent] = []
     for path in args.reference or []:
         events.append(
@@ -231,11 +243,15 @@ def _events(args: argparse.Namespace) -> list[SoundEvent]:
 
 
 def _describe(events: Sequence[SoundEvent]) -> str:
-    return ", ".join(
-        f"'{e.name}' ({len(e.templates)} clip{'s' if len(e.templates) > 1 else ''}, "
-        f"threshold {e.threshold:g}, cooldown {e.cooldown:g}s)"
-        for e in events
-    )
+    def one(e: SoundEvent) -> str:
+        n = len(e.templates)
+        return (
+            f"'{e.name}' ({n} template{'s' if n > 1 else ''} of up to {e.duration:.2f}s, "
+            f"threshold {e.threshold:g}, cooldown {e.cooldown:g}s, "
+            f"min level {e.min_level_db:g} dBFS)"
+        )
+
+    return ", ".join(one(e) for e in events)
 
 
 # -- scan ------------------------------------------------------------------------------------
@@ -250,20 +266,26 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print(f"Scanned {args.wav} ({result.duration:.1f}s in {took:.2f}s) for {_describe(events)}")
     print(f"\nDetections ({len(result.detections)}):")
     for d in result.detections:
-        print(f"  {_clock(d.start)}  {d.name}  similarity {d.similarity:.3f}  (clip {d.template})")
+        print(
+            f"  {_clock(d.start)}  {d.name}  similarity {d.similarity:.3f}  "
+            f"level {d.level_db:5.1f} dBFS  ({d.template})"
+        )
     if not result.detections:
         print("  none")
     for ev in events:
         peaks = result.peaks(ev.name)
         shown = max(args.top, (args.expect or 0) + 3)
-        print(f"\nStrongest matches of '{ev.name}' (start, score):")
-        for i, (t, s) in enumerate(peaks[:shown], 1):
-            mark = "  <- detected" if s >= ev.threshold else ""
-            print(f"  {i:3d}. {_clock(t)}  {s:.3f}{mark}")
+        print(f"\nStrongest matches of '{ev.name}' (start, score, window level, template):")
+        for i, pk in enumerate(peaks[:shown], 1):
+            mark = "  <- detected" if pk.score >= ev.threshold else ""
+            print(
+                f"  {i:3d}. {_clock(pk.start)}  {pk.score:.3f}  {pk.level_db:6.1f} dBFS  "
+                f"{pk.template}{mark}"
+            )
         if not peaks:
             print("  none: the recording is silent or quieter than the minimum level")
         if args.expect:
-            suggestion = suggest_threshold([s for _, s in peaks], args.expect)
+            suggestion = suggest_threshold([pk.score for pk in peaks], args.expect)
             if suggestion is None:
                 print(
                     f"\nOnly {len(peaks)} candidate(s) found, "
@@ -305,6 +327,7 @@ def cmd_monitor(args: argparse.Namespace) -> int:
                         "name": d.name,
                         "similarity": round(d.similarity, 4),
                         "template": d.template,
+                        "level_db": round(d.level_db, 1),
                         "stream_start": round(d.start, 4),
                         "latency": round(d.latency, 4),
                     }
@@ -313,8 +336,8 @@ def cmd_monitor(args: argparse.Namespace) -> int:
             )
         else:
             _say(
-                f"DETECTED {d.name}  similarity={d.similarity:.2f}  "
-                f"(clip {d.template}, {d.latency:.2f}s after it started)"
+                f"DETECTED {d.name}  similarity={d.similarity:.2f}  level={d.level_db:.1f} dBFS  "
+                f"({d.template}, {d.latency:.2f}s after it started)"
             )
 
     detector.on_detect(report)
@@ -422,6 +445,23 @@ def build_parser() -> argparse.ArgumentParser:
         )
         sp.add_argument("--threshold", type=float, help="override the similarity threshold")
         sp.add_argument("--cooldown", type=float, help="override the cooldown, seconds")
+        tuning_args(sp)
+
+    def tuning_args(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument(
+            "--min-level", type=float, help="quieter windows are not matched, dBFS (default -50)"
+        )
+        sp.add_argument(
+            "--pitch-tolerance",
+            type=float,
+            help="also match each clip played up to this much faster or slower, e.g. 0.06 "
+            "(for sounds whose pitch varies; default 0)",
+        )
+        sp.add_argument(
+            "--template-length",
+            type=float,
+            help="use only the first seconds of each clip (faster detection); 0 = all (default)",
+        )
 
     sp = sub.add_parser("devices", help="list output devices and applications you can listen to")
     sp.set_defaults(func=cmd_devices)
@@ -457,9 +497,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("name")
     sp.add_argument("--threshold", type=float)
     sp.add_argument("--cooldown", type=float)
-    sp.add_argument(
-        "--min-level", type=float, help="quieter audio is not matched, dBFS (default -50)"
-    )
+    tuning_args(sp)
     sp.add_argument(
         "--mask-db",
         type=float,

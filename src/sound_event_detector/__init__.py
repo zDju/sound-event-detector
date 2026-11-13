@@ -17,7 +17,17 @@ from .capture import (
 from .detector import SoundDetector, Stats
 from .features import DEFAULT_PARAMS, FeatureParams
 from .library import Library
-from .matching import Detection, Matcher, ScanResult, SoundEvent, Template, scan, suggest_threshold
+from .matching import (
+    Detection,
+    Matcher,
+    Peak,
+    ScanResult,
+    SoundEvent,
+    Template,
+    pitch_rates,
+    scan,
+    suggest_threshold,
+)
 
 try:
     __version__ = version("sound-event-detector")
@@ -34,6 +44,7 @@ __all__ = [
     "FileSource",
     "Library",
     "Matcher",
+    "Peak",
     "ScanResult",
     "SoundDetector",
     "SoundEvent",
@@ -45,6 +56,7 @@ __all__ = [
     "list_devices",
     "load_wav",
     "open_source",
+    "pitch_rates",
     "record",
     "save_wav",
     "scan",

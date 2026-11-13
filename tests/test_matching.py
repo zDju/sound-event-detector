@@ -9,8 +9,16 @@ import numpy as np
 import pytest
 
 import synth
-from sound_event_detector import Matcher, SoundEvent, Template, scan, suggest_threshold
-from sound_event_detector.audio import resample
+from sound_event_detector import (
+    Matcher,
+    SoundEvent,
+    Template,
+    pitch_rates,
+    scan,
+    suggest_threshold,
+)
+from sound_event_detector.audio import resample, save_wav
+from sound_event_detector.matching import _skew_sum
 
 R = 48000
 SPLASH = synth.splash(R)
@@ -65,7 +73,7 @@ def test_noise_and_music(splash_event, background, min_score):
 def test_no_false_detections(splash_event, x):
     r = scan(x, R, [splash_event])
     assert r.detections == []
-    best = max((s for _, s in r.peaks("splash")), default=-1.0)
+    best = max((pk.score for pk in r.peaks("splash")), default=-1.0)
     assert best < splash_event.threshold - 0.1  # a clear margin, not a near miss
 
 
@@ -172,10 +180,64 @@ def test_suggest_threshold():
 def test_peaks_find_each_event(splash_event):
     x = synth.mix(synth.pink_noise(12, R, -30), R, [(2.0, SPLASH, 1.0), (8.0, SPLASH, 0.5)])
     peaks = scan(x, R, [splash_event]).peaks("splash")
-    assert [round(t, 1) for t, _ in peaks[:2]] == [2.0, 8.0] or [
-        round(t, 1) for t, _ in peaks[:2]
-    ] == [8.0, 2.0]
-    assert peaks[2][1] < 0.6
+    assert sorted(round(pk.start, 1) for pk in peaks[:2]) == [2.0, 8.0]
+    assert peaks[2].score < 0.6
+    louder = next(pk for pk in peaks if round(pk.start, 1) == 2.0)
+    softer = next(pk for pk in peaks if round(pk.start, 1) == 8.0)
+    assert louder.level_db - softer.level_db == pytest.approx(5.0, abs=1.5)  # 6 dB on the sound
+
+
+def test_detection_reports_window_level(splash_event):
+    x = synth.mix(np.zeros(R * 3, np.float32), R, [(1.0, SPLASH, 0.5)])
+    d = scan(x, R, [splash_event]).detections[0]
+    seg = resample(x, R, 22050)[round(d.start * 22050) : round(d.end * 22050)]
+    expected = 10 * np.log10(np.mean(seg.astype(np.float64) ** 2))
+    assert d.level_db == pytest.approx(expected, abs=0.5)
+
+
+def test_pitch_rates():
+    assert pitch_rates(0) == [1.0]
+    assert pitch_rates(0.06) == [0.94, 0.96, 0.98, 1.0, 1.02, 1.04, 1.06]
+    with pytest.raises(ValueError):
+        pitch_rates(-0.1)
+
+
+@pytest.mark.parametrize("speed", [0.95, 1.05])
+def test_pitch_tolerance_catches_faster_and_slower_playback(tmp_path, speed):
+    ref = tmp_path / "ref.wav"
+    save_wav(ref, SPLASH, R, float32=True)
+    shifted = resample(SPLASH, R, round(R / speed))  # played `speed` times as fast
+    x = synth.mix(synth.music(6, R, -30), R, [(2.0, shifted, 1.0)])
+    strict = SoundEvent.from_wav(ref, name="s")
+    tolerant = SoundEvent.from_wav(ref, name="s", pitch_tolerance=0.06)
+    assert len(tolerant.templates) == 7
+    assert scan(x, R, [strict]).detections == []
+    found = scan(x, R, [tolerant]).detections
+    assert [round(d.start, 1) for d in found] == [2.0]
+    assert found[0].similarity > 0.9
+    assert found[0].template in {f"ref@{speed - 0.01:.2f}", f"ref@{speed + 0.01:.2f}"}
+
+
+def test_template_length_shortens_detection_delay(tmp_path):
+    ref = tmp_path / "ref.wav"
+    save_wav(ref, SPLASH, R, float32=True)
+    full = SoundEvent.from_wav(ref, name="s")
+    short = SoundEvent.from_wav(ref, name="s", template_length=0.3)
+    assert short.duration <= 0.3 < full.duration  # no pitch variants here
+    x = synth.mix(synth.pink_noise(4, R, -40), R, [(1.0, SPLASH, 1.0)])
+    d_full = scan(x, R, [full]).detections[0]
+    d_short = scan(x, R, [short]).detections[0]
+    assert d_short.latency < 0.35 < d_full.latency
+
+
+def test_skew_sum_matches_naive():
+    rng = np.random.default_rng(0)
+    rows, pending = rng.standard_normal((5, 4)), rng.standard_normal(3)
+    naive = np.zeros(8)
+    naive[:3] += pending
+    for k in range(5):
+        naive[k : k + 4] += rows[k]
+    np.testing.assert_allclose(_skew_sum(rows, pending), naive)
 
 
 def test_analysis_is_much_faster_than_real_time(splash_event):

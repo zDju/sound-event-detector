@@ -4,7 +4,8 @@ Layout (human-readable, editable by hand)::
 
     <library>/
       <event-name>/
-        event.toml      optional: threshold, cooldown, min_level_db, mask_db
+        event.toml      optional: threshold, cooldown, min_level_db, mask_db,
+                        pitch_tolerance, template_length
         <label>.wav     one file per reference clip (variant) of the sound
 
 The default library lives in the user's data directory; set ``SOUND_EVENT_DETECTOR_HOME`` or
@@ -23,7 +24,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .audio import save_wav, to_mono
+from .audio import load_wav, save_wav, to_mono
 from .features import DEFAULT_PARAMS, FeatureParams
 from .matching import (
     DEFAULT_COOLDOWN,
@@ -40,6 +41,8 @@ SETTINGS = {
     "cooldown": DEFAULT_COOLDOWN,
     "min_level_db": DEFAULT_MIN_LEVEL_DB,
     "mask_db": DEFAULT_MASK_DB,
+    "pitch_tolerance": 0.0,  # also match each clip played up to this much faster/slower
+    "template_length": 0.0,  # use only the first seconds of each clip; 0 = all of it
 }
 
 
@@ -160,8 +163,20 @@ class Library:
         stored settings when not ``None``."""
         info = self.info(name)
         s = dict(info.settings)
+        unknown = set(overrides) - set(SETTINGS)
+        if unknown:
+            raise ValueError(f"unknown settings {sorted(unknown)}")
         s.update({k: float(v) for k, v in overrides.items() if v is not None})
         templates = tuple(
-            Template.from_wav(c, params=params, mask_db=s["mask_db"]) for c in info.clips
+            t
+            for c in info.clips
+            for t in Template.variants(
+                *load_wav(c),
+                label=c.stem,
+                params=params,
+                mask_db=s["mask_db"],
+                pitch_tolerance=s["pitch_tolerance"],
+                length=s["template_length"] or None,
+            )
         )
         return SoundEvent(name, templates, s["threshold"], s["cooldown"], s["min_level_db"])

@@ -109,6 +109,13 @@ def test_library_add_load_settings(tmp_path):
     assert (ev.threshold, ev.cooldown, len(ev.templates)) == (0.8, 1.5, 2)
     assert lib.load("bite", threshold=0.6).threshold == 0.6
     assert lib.update_settings("bite", {"threshold": None})["threshold"] == 0.75
+    lib.update_settings("bite", {"pitch_tolerance": 0.04, "template_length": 0.3})
+    ev = lib.load("bite")
+    assert len(ev.templates) == 2 * 5 and ev.duration <= 0.3 / 0.96 + 0.01  # slowed = longer
+    assert {t.label for t in ev.templates} >= {"bite", "bite@0.96", "bite-2@1.04"}
+    assert len(lib.load("bite", pitch_tolerance=0).templates) == 2
+    with pytest.raises(ValueError):
+        lib.load("bite", treshold=0.5)
     with pytest.raises(KeyError):
         lib.info("nothing")
     with pytest.raises(ValueError):
