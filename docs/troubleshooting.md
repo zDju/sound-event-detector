@@ -23,14 +23,17 @@ user.
 
 ## Known limitations
 
-- **Windows is unverified on real hardware.** Output loopback uses SoundCard's WASAPI path.
+- **Windows is verified on one computer only.** On Windows 11 build 26300 capturing one
+  application worked live for half an hour, and the Windows test suite passes there with
+  `SOUNDDETECTOR_REQUIRE_WASAPI=1`; output loopback and Windows 10 are not confirmed yet. How
+  it was built and checked before that: output loopback uses SoundCard's WASAPI path.
   Per-application capture uses WASAPI process loopback, called through ctypes as in
   Microsoft's ApplicationLoopback sample; no extra dependency. Its logic and its COM calls are
   tested on every platform against a simulated Windows, and the Windows test suite (without a
   sound device) will run in CI on the first push. Under Wine, which has no process loopback,
   the structure sizes and the completion handler's COM calls were checked, and activation got
   as far as Wine's `ActivateAudioInterfaceAsync`, which failed because Wine cannot capture a
-  process. Until someone confirms it on real Windows, expect problems there (see
+  process. On other Windows computers, Windows 10 above all, expect problems (see
   [Testing on Windows](windows-testing.md)). macOS is not supported (it has no loopback
   capture without a virtual audio device).
 - **Per-application capture on Linux** follows the first stream of the matching application;

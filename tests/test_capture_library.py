@@ -132,6 +132,14 @@ def test_library_rejects_unknown_settings(tmp_path):
         lib.settings("x")
 
 
+def test_library_settings_with_a_byte_order_mark(tmp_path):
+    lib = Library(tmp_path)
+    lib.add("x", synth.splash(R), R)
+    (tmp_path / "x" / "event.toml").write_bytes(b"\xef\xbb\xbfthreshold = 0.6\n")
+    assert lib.settings("x")["threshold"] == 0.6
+    assert lib.update_settings("x", {"cooldown": 1.0})["threshold"] == 0.6
+
+
 class FakeMic:
     def __init__(self, id, name):
         self.id, self.name, self.isloopback = id, name, True

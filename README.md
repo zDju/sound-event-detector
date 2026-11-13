@@ -16,11 +16,12 @@ processing (log-mel spectrogram template matching). No machine learning, no GPU,
 - **Light**: a few percent of one CPU core, bounded memory, NumPy + SciPy + SoundCard only.
 
 > **Platform status.** Verified on Linux (Manjaro, PipeWire 1.6 with pipewire-pulse; live
-> checks on Python 3.14, test suite on 3.12 and 3.14). Windows is implemented but **unverified
-> on real hardware**: output loopback goes through SoundCard's WASAPI path, and capturing one
-> application through WASAPI process loopback (Windows 10 version 2004 or later). If you have
-> Windows, please run the [Windows test checklist](docs/windows-testing.md) and report the
-> result. macOS is not supported.
+> checks on Python 3.14, test suite on 3.12 and 3.14). On Windows, capturing one application
+> through WASAPI process loopback is **verified on one Windows 11 computer** (build 26300,
+> Python 3.12: half an hour of live detection, test suite with `SOUNDDETECTOR_REQUIRE_WASAPI`).
+> Not confirmed yet: output loopback (SoundCard's WASAPI path, `selftest`) and Windows 10
+> 2004–22H2. If you have Windows, please run the [Windows test checklist](docs/windows-testing.md)
+> and report the result. macOS is not supported.
 
 ## Install
 
@@ -108,7 +109,8 @@ Iterating, library events, offline `scan()`, the `Detection` fields and the I/O-
 
 ## Known limitations
 
-- **Windows is unverified on real hardware**; macOS is not supported.
+- **Windows is verified on one Windows 11 computer only** (one application's audio); macOS is
+  not supported.
 - **Output-device capture hears everything** that plays; prefer `app:`.
 - **Every copy of the sound is detected**; only the level tells near from far (`--min-level`).
 - **Templates are fixed**; sounds that vary in other ways than pitch may be beyond template

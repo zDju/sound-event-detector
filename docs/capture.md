@@ -40,7 +40,7 @@ for you (see [Testing on Windows](windows-testing.md)).
 - **Several matches**: the first one is used.
 - **"Playing audio"** means it has a PipeWire playback stream.
 
-### Windows 10 2004+ (unverified)
+### Windows 10 2004+ (verified on one Windows 11 computer)
 
 - **`app:NAME` matches** the executable name, case-insensitive, `.exe` optional (`app:firefox`,
   `app:Firefox.exe`); else the name the application gave its audio session; else part of

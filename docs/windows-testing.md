@@ -1,7 +1,8 @@
 # Testing on Windows
 
-Windows support has not been confirmed on real hardware yet. On Windows 10 (version 2004 or
-later) or 11 these steps, about 15 minutes, tell whether it works. As the application, use a
+Capturing one application is confirmed on one Windows 11 computer (build 26300); output loopback
+and Windows 10 are not confirmed yet. On Windows 10 (version 2004 or later) or 11 these steps,
+about 15 minutes, tell whether it works. As the application, use a
 browser playing a video and, if you have one, a media player (VLC, Windows Media Player).
 Copy each command's output from the console window as you go.
 

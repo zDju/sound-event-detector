@@ -66,6 +66,12 @@ class EventInfo:
     settings: dict[str, float]
 
 
+def _read_toml(f: Path) -> dict:
+    """An ``event.toml``; a UTF-8 byte order mark (Windows PowerShell 5.1's ``-Encoding utf8``,
+    older Notepad) is allowed."""
+    return tomllib.loads(f.read_text(encoding="utf-8-sig"))
+
+
 def _check_name(name: str, what: str = "event name") -> None:
     if not NAME_RE.match(name):
         raise ValueError(f"invalid {what} {name!r}: use letters, digits, '_', '-' and '.'")
@@ -96,8 +102,7 @@ class Library:
         values = dict(SETTINGS)
         f = self.path(name) / "event.toml"
         if f.is_file():
-            with f.open("rb") as fh:
-                data = tomllib.load(fh)
+            data = _read_toml(f)
             unknown = set(data) - set(SETTINGS)
             if unknown:
                 raise ValueError(f"{f}: unknown settings {sorted(unknown)}")
@@ -113,8 +118,7 @@ class Library:
         current = {}
         f = folder / "event.toml"
         if f.is_file():
-            with f.open("rb") as fh:
-                current = {k: float(v) for k, v in tomllib.load(fh).items()}
+            current = {k: float(v) for k, v in _read_toml(f).items()}
         for k, v in values.items():
             if v is None:
                 current.pop(k, None)
