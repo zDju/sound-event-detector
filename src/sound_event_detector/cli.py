@@ -76,19 +76,26 @@ def cmd_devices(args: argparse.Namespace) -> int:
             mark = "*" if d.is_default else " "
             print(f"  {mark} {d.name}\n      id: {d.id}")
         print("  (* = default output, used when no --source is given)")
-    if sys.platform.startswith("linux"):
+    if sys.platform.startswith("linux") or sys.platform == "win32":
         try:
             apps = list_apps()
         except CaptureError as e:
             print(f"\nApplications: unavailable ({e})")
             return 0
-        print("\nApplications playing audio; use --source app:<name or pid>")
+        if sys.platform == "win32":
+            print("\nApplications with audio open; use --source app:<name or pid>")
+        else:
+            print("\nApplications playing audio; use --source app:<name or pid>")
         if not apps:
             print("  (none right now; an application appears here while it has sound open)")
         for a in apps:
-            pid = f"pid {a.pid}" if a.pid is not None else "pid ?"
+            details = [f"pid {a.pid}" if a.pid is not None else "pid ?"]
+            if a.binary != a.name:
+                details.append(a.binary or "?")
+            if a.state:
+                details.append(a.state)
             extra = f"  — {a.media}" if a.media and a.media != a.name else ""
-            print(f"    {a.name}  ({pid}, {a.binary or '?'}){extra}")
+            print(f"    {a.name}  ({', '.join(details)}){extra}")
     return 0
 
 
@@ -439,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
             "-s",
             "--source",
             help="what to listen to: default output (default), device:TEXT, app:NAME or app:PID "
-            "(Linux), or file:PATH.wav",
+            "(Linux, Windows 10 2004+), or file:PATH.wav",
         )
 
     def event_args(sp: argparse.ArgumentParser) -> None:

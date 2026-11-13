@@ -46,7 +46,7 @@ PW_DUMP = json.dumps(
                     "object.serial": 102,
                     "node.name": "wine-stream",
                     "application.process.id": "777",
-                    "application.process.binary": "Wow.exe",
+                    "application.process.binary": "Player.exe",
                 }
             },
         },
@@ -59,14 +59,14 @@ def test_parse_app_streams():
     streams = parse_app_streams(PW_DUMP)
     assert [(s.serial, s.name, s.pid, s.binary) for s in streams] == [
         (101, "Firefox", 4321, "firefox"),
-        (102, "wine-stream", 777, "Wow.exe"),
+        (102, "wine-stream", 777, "Player.exe"),
     ]
 
 
 def test_find_app_by_name_binary_or_pid():
     streams = parse_app_streams(PW_DUMP)
     assert find_app("firefox", streams).serial == 101
-    assert find_app("wow", streams).serial == 102
+    assert find_app("player", streams).serial == 102
     assert find_app("777", streams).serial == 102
     assert find_app("spotify", streams) is None
 

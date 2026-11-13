@@ -4,7 +4,8 @@
   Linux, WASAPI loopback on Windows). SoundCard is imported only when a device is opened, because
   on Linux importing it connects to the sound server.
 * One application's audio is captured on Linux with ``pw-record`` linked straight to that
-  application's PipeWire playback stream, so nothing else playing on the machine is heard.
+  application's PipeWire playback stream, so nothing else playing on the machine is heard. On
+  Windows 10 2004+ the same is done with WASAPI process loopback (:mod:`.winapp`).
 * A WAV file can stand in for a device, for tests and demonstrations.
 
 Every source delivers float32 audio shaped ``(frames, channels)`` at the rate it was asked for;
@@ -25,11 +26,14 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import numpy as np
 
 from .audio import load_wav, resample, to_mono
+
+if TYPE_CHECKING:
+    from .winapp import Backend, WindowsAppSource
 
 log = logging.getLogger("sound_event_detector")
 
@@ -223,11 +227,15 @@ class DeviceSource:
 
 @dataclass(frozen=True)
 class AppStream:
-    serial: int  # object.serial, what `pw-record --target` accepts
-    name: str  # application.name (or node.name)
+    """An application playing audio: a PipeWire stream on Linux, a process with an audio
+    session on Windows. ``app:NAME`` with ``name`` (or ``app:PID``) captures it."""
+
+    serial: int  # object.serial, what `pw-record --target` accepts (0 on Windows)
+    name: str  # application.name (or node.name); on Windows the executable name
     pid: int | None
-    binary: str  # application.process.binary
-    media: str  # media.name, e.g. the tab or track title
+    binary: str  # application.process.binary; on Windows the executable name
+    media: str  # media.name, e.g. the tab or track title; on Windows the session's display name
+    state: str = ""  # Windows: "active" while playing, "inactive" while paused
 
 
 PW_STREAM_CLASS = "Stream/Output/Audio"
@@ -270,9 +278,14 @@ def parse_app_streams(dump: str) -> list[AppStream]:
 
 
 def list_apps(*, dump: Callable[[], str] | None = None) -> list[AppStream]:
-    """Applications currently playing audio (Linux with PipeWire only)."""
+    """Applications currently playing audio: PipeWire playback streams on Linux, processes
+    with an audio session on Windows."""
+    if sys.platform == "win32":
+        from .winapp import list_windows_apps
+
+        return list_windows_apps()
     if not sys.platform.startswith("linux"):
-        raise CaptureError("listing applications is only implemented for Linux with PipeWire")
+        raise CaptureError("listing applications is implemented for Linux (PipeWire) and Windows")
     return parse_app_streams((dump or _pw_dump)())
 
 
@@ -291,7 +304,13 @@ def find_app(query: str, streams: list[AppStream]) -> AppStream | None:
 
 
 class AppSource:
-    """Capture one application's audio through PipeWire (``pw-record`` linked to its stream)."""
+    """Capture one application's audio: ``app:NAME`` or ``app:PID``.
+
+    On Linux ``pw-record`` is linked to the application's PipeWire stream. On Windows 10
+    2004+ WASAPI process loopback captures the application and its child processes
+    (:class:`.winapp.WindowsAppSource`). Either way opening fails while the application is
+    not playing audio, and reading fails once it has stopped, so a detector waits for it.
+    """
 
     def __init__(
         self,
@@ -300,20 +319,36 @@ class AppSource:
         sample_rate: int = 22050,
         channels: int = 1,
         dump: Callable[[], str] | None = None,
+        backend: Backend | None = None,
     ) -> None:
         self.app = app
         self.sample_rate = sample_rate
         self.channels = channels
         self.name = f"application {app!r}"
-        self._dump = dump
+        self._dump = dump  # Linux: replaces `pw-dump` (tests)
+        self._backend = backend  # Windows: replaces the WASAPI calls (tests)
         self._proc: subprocess.Popen[bytes] | None = None
         self._rest = b""
+        self._win: WindowsAppSource | None = None  # the Windows capture, once opened there
 
     def open(self) -> None:
+        if sys.platform == "win32":
+            if self._win is None:
+                from .winapp import WindowsAppSource
+
+                self._win = WindowsAppSource(
+                    self.app,
+                    sample_rate=self.sample_rate,
+                    channels=self.channels,
+                    backend=self._backend,
+                )
+            self._win.open()
+            self.name = self._win.name
+            return
         if not sys.platform.startswith("linux"):
             raise CaptureError(
-                "capturing one application's audio is only implemented for Linux (PipeWire); "
-                "use the default output or a device instead"
+                "capturing one application's audio is implemented for Linux (PipeWire) and "
+                "Windows 10 version 2004 or later; use the default output or a device instead"
             )
         if shutil.which("pw-record") is None:
             raise CaptureError("pw-record not found; install PipeWire's command-line tools")
@@ -338,6 +373,8 @@ class AppSource:
         self.name = f"{stream.name} ({who}, application audio only)"
 
     def read(self, frames: int) -> np.ndarray:
+        if self._win is not None:
+            return self._win.read(frames)
         proc = self._proc
         if proc is None or proc.stdout is None:
             raise CaptureError("source is not open")
@@ -365,6 +402,8 @@ class AppSource:
         return np.frombuffer(data[:usable], dtype="<f4").reshape(-1, self.channels).copy()
 
     def close(self) -> None:
+        if self._win is not None:
+            self._win.close()
         proc, self._proc = self._proc, None
         if proc is None:
             return
@@ -444,7 +483,8 @@ def open_source(spec: str | None = None, *, sample_rate: int = 22050, channels: 
     """A source from a short description (it is opened later, by whoever reads it).
 
     * ``None``, ``""`` or ``"default"``: loopback of the default output, following changes;
-    * ``"app:NAME"`` or ``"app:PID"``: one application's audio (Linux/PipeWire);
+    * ``"app:NAME"`` or ``"app:PID"``: one application's audio (Linux/PipeWire, Windows 10
+      2004+);
     * ``"file:PATH"``: a WAV file played at real-time pace;
     * ``"device:QUERY"`` or any other text: the output device whose id or name contains it.
     """
