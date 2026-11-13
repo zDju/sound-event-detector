@@ -30,8 +30,21 @@ class UsageError(Exception):
     """A problem with what the user asked for; printed without a traceback."""
 
 
+class _StderrHandler(logging.StreamHandler):
+    """Writes to whatever ``sys.stderr`` is when a record is logged, not when it was created
+    (``main()`` may run many times in one process, e.g. under a test runner)."""
+
+    @property
+    def stream(self):
+        return sys.stderr
+
+    @stream.setter
+    def stream(self, value: object) -> None:
+        pass
+
+
 def _setup_logging(verbose: bool) -> None:
-    handler = logging.StreamHandler(sys.stderr)
+    handler = _StderrHandler()
     handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", "%H:%M:%S"))
     root = logging.getLogger("sound_event_detector")
     root.handlers[:] = [handler]

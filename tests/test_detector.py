@@ -37,8 +37,7 @@ def test_callbacks_and_start_stop(tmp_path, splash_event):
     got = []
     det.on_detect(got.append)
     det.start()
-    assert det.wait(10)
-    time.sleep(0.3)  # let the dispatcher deliver
+    assert det.wait(10)  # capture ended and every detection was delivered
     det.stop()
     assert [round(d.start, 2) for d in got] == [1.0, 4.5]
 

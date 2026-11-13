@@ -167,11 +167,14 @@ class SoundDetector:
                 t.join(timeout)
 
     def wait(self, timeout: float | None = None) -> bool:
-        """Block until listening ends (``stop()``, end of a file, or an error); True if it did."""
-        t = self._capture
-        if t is not None:
-            t.join(timeout)
-            return not t.is_alive()
+        """Block until listening ends (``stop()``, end of a file, or an error) and, after
+        :meth:`start`, every detection has been passed to the callbacks; True if it did."""
+        deadline = None if timeout is None else time.monotonic() + timeout
+        for t in (self._capture, self._dispatcher):
+            if t is not None and t is not threading.current_thread():
+                t.join(None if deadline is None else max(0.0, deadline - time.monotonic()))
+                if t.is_alive():
+                    return False
         return True
 
     def run(self) -> None:
@@ -218,6 +221,9 @@ class SoundDetector:
             except queue.Empty:
                 continue
             if item is _DONE:
+                capture = self._capture  # it is exiting; make `running` false before returning
+                if capture is not None and capture is not threading.current_thread():
+                    capture.join()
                 if self._error is not None:
                     raise RuntimeError(f"audio capture failed: {self._error}") from self._error
                 return
