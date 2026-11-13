@@ -501,7 +501,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("wav", type=Path, help="recording that contains the sound")
     sp.add_argument("-n", "--name", required=True, help="event name, e.g. bite")
     sp.add_argument(
-        "--start", type=float, help="where the sound starts, seconds (default: detected)"
+        "--start",
+        type=float,
+        help="where the sound starts, seconds (default: where the loudest sound starts)",
     )
     sp.add_argument("--length", type=float, help="clip length, seconds (default: until it fades)")
     sp.add_argument("--end", type=float, help="where the sound ends, seconds")

@@ -79,13 +79,20 @@ def level_db(samples: np.ndarray) -> float:
 
 
 def find_onset(
-    samples: np.ndarray, sample_rate: int, *, rise_db: float = 15.0, frame_s: float = 0.005
+    samples: np.ndarray,
+    sample_rate: int,
+    *,
+    rise_db: float = 15.0,
+    frame_s: float = 0.005,
+    gap_s: float = 0.05,
 ) -> float:
     """Seconds into ``samples`` where the loudest sound starts.
 
-    The onset is the first short frame whose level is ``rise_db`` above the recording's floor
-    (its 10th-percentile frame level) and within 30 dB of its loudest frame, so a quiet hiss
-    before the sound does not count but a soft attack does.
+    A frame is part of a sound when its level is ``rise_db`` above the recording's floor (its
+    10th-percentile frame level) and within 30 dB of the loudest frame, so a quiet hiss does not
+    count but a soft attack does. From the loudest frame the onset is followed back until the
+    level stays below that for ``gap_s``: earlier, quieter sounds in the recording (other events
+    before the one wanted) are not taken, and short dips inside the sound do not cut it.
     """
     x = to_mono(samples)
     n = max(1, int(frame_s * sample_rate))
@@ -99,7 +106,16 @@ def find_onset(
     if peak - floor < 6.0:  # nothing stands out: the whole clip is the sound
         return 0.0
     threshold = max(floor + rise_db, peak - 30.0)
-    first = int(np.argmax(levels >= threshold))
+    gap = max(1, round(gap_s / frame_s))
+    first = int(np.argmax(levels))  # the loudest frame; walk back to where its sound starts
+    quiet = 0  # frames in a row below the threshold, just before ``first``
+    for i in range(first - 1, -1, -1):
+        if levels[i] >= threshold:
+            first, quiet = i, 0
+        else:
+            quiet += 1
+            if quiet >= gap:
+                break
     return max(0, first - 1) * n / sample_rate  # one frame of margin before the attack
 
 

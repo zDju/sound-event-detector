@@ -88,6 +88,10 @@ sounddetector add bite-raw.wav --name bite                 # start and end are d
 sounddetector add bite-raw.wav --name bite --start 3.2 --length 0.6
 ```
 
+Without `--start`, `add` takes the **loudest** sound in the recording, from where it begins to
+where it fades. A recording where the wanted sound is the loudest thing in it works best: stop
+the recording before anything louder happens.
+
 Each event can have several clips (variants of the same sound); the event fires when any of
 them matches. The library lives in your user data folder (`~/.local/share/sound-event-detector`
 on Linux, `%LOCALAPPDATA%\sound-event-detector` on Windows), one folder per event with its WAV

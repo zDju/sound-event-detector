@@ -58,6 +58,19 @@ def test_find_onset_and_end():
     assert 1.234 + 0.5 < end <= 1.234 + 0.75  # the splash lasts 0.7 s and decays
 
 
+def test_find_onset_takes_the_loudest_sound_not_the_first():
+    # a quieter sound first (e.g. the start of an action), the wanted one later and louder
+    x = synth.mix(
+        synth.pink_noise(6, R, -60),
+        R,
+        [(1.0, synth.splash(R), 0.3), (4.5, synth.splash(R), 1.0)],
+    )
+    onset = find_onset(x, R)
+    assert 4.48 <= onset <= 4.51
+    end = find_end(x, R, onset)
+    assert 4.5 + 0.5 < end <= 4.5 + 0.75
+
+
 def test_trim_bounds():
     x = np.arange(100, dtype=np.float32)
     assert len(trim(x, 10, 2.0, 3.0)) == 30
