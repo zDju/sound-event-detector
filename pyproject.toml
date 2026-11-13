@@ -1,0 +1,50 @@
+[project]
+name = "sound-event-detector"
+version = "0.1.0"
+description = "Detect short, predefined sound events in live system audio or WAV recordings."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "zdju" }]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "soundcard>=0.4.3",
+]
+
+[project.scripts]
+sounddetector = "sound_event_detector.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/zDju/sound-event-detector"
+Issues = "https://github.com/zDju/sound-event-detector/issues"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: needs a real sound server and plays audio (deselected by default)"]
+addopts = "-m 'not live'"
+
+[tool.basedpyright]
+include = ["src"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Lint
+        run: uv run --python ${{ matrix.python }} ruff check src tests examples
+      - name: Type check
+        run: uv run --python ${{ matrix.python }} basedpyright
+      - name: Tests (synthetic audio, no sound device needed)
+        run: uv run --python ${{ matrix.python }} pytest -q
